@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --hud-grid: rgba(20, 241, 217, 0.05);
+  --hud-glow: rgba(0, 255, 200, 0.55);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background:
+    radial-gradient(1100px 700px at 80% -10%, rgba(0, 229, 255, 0.08), transparent 60%),
+    radial-gradient(900px 600px at -10% 110%, rgba(0, 255, 200, 0.06), transparent 60%),
+    #03070f;
+  font-family: "Inter", system-ui, sans-serif;
+  letter-spacing: 0.01em;
+  overflow-x: hidden;
+}
+
+/* Faint data-grid overlay (spec §2 — sci-fi HUD with faint data-grid overlay) */
+.hud-grid {
+  background-image:
+    linear-gradient(rgba(20, 241, 217, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(20, 241, 217, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+  background-position: -1px -1px;
+  pointer-events: none;
+}
+
+.hud-vignette {
+  background: radial-gradient(circle at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.55) 100%);
+  pointer-events: none;
+}
+
+/* Holographic panel surface */
+.holo-panel {
+  position: relative;
+  background:
+    linear-gradient(180deg, rgba(10, 18, 36, 0.85) 0%, rgba(7, 14, 28, 0.7) 100%);
+  border: 1px solid rgba(20, 241, 217, 0.22);
+  box-shadow:
+    0 0 0 1px rgba(20, 241, 217, 0.05) inset,
+    0 0 28px rgba(0, 229, 255, 0.05),
+    0 30px 60px -30px rgba(0, 229, 255, 0.18);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+.holo-panel::before,
+.holo-panel::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 1px solid rgba(0, 255, 200, 0.65);
+  pointer-events: none;
+}
+.holo-panel::before {
+  top: -1px;
+  left: -1px;
+  border-right: none;
+  border-bottom: none;
+}
+.holo-panel::after {
+  bottom: -1px;
+  right: -1px;
+  border-left: none;
+  border-top: none;
+}
+
+/* Neon button */
+.neon-btn {
+  position: relative;
+  background: linear-gradient(180deg, rgba(0, 255, 200, 0.05), rgba(0, 229, 255, 0.02));
+  border: 1px solid rgba(0, 255, 200, 0.45);
+  color: #dff5ff;
+  box-shadow:
+    0 0 0 1px rgba(20, 241, 217, 0.06) inset,
+    0 0 18px rgba(0, 255, 200, 0.12);
+  transition: all 220ms ease;
+}
+.neon-btn:hover {
+  background: linear-gradient(180deg, rgba(0, 255, 200, 0.12), rgba(0, 229, 255, 0.06));
+  border-color: rgba(0, 255, 200, 0.85);
+  box-shadow:
+    0 0 0 1px rgba(20, 241, 217, 0.18) inset,
+    0 0 32px rgba(0, 255, 200, 0.35);
+}
+.neon-btn:focus-visible {
+  outline: none;
+  border-color: #00ffc8;
+  box-shadow: 0 0 0 2px rgba(0, 255, 200, 0.6);
+}
+
+/* Sidebar nav item */
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.95rem;
+  border-radius: 0.5rem;
+  color: #7f9bb3;
+  transition: all 180ms ease;
+}
+.nav-item:hover {
+  color: #dff5ff;
+  background: rgba(0, 255, 200, 0.04);
+}
+.nav-item[aria-current="page"] {
+  color: #dff5ff;
+  background: linear-gradient(90deg, rgba(0, 255, 200, 0.12), rgba(0, 229, 255, 0.02));
+  box-shadow: inset 2px 0 0 0 #00ffc8, inset 0 0 24px rgba(0, 255, 200, 0.06);
+}
+.nav-item[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 25%;
+  bottom: 25%;
+  width: 2px;
+  background: linear-gradient(180deg, transparent, #00ffc8, transparent);
+  box-shadow: 0 0 12px #00ffc8;
+}
+
+/* Subtle scanline pass */
+.scanline {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.scanline::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 0%, rgba(0, 255, 200, 0.04) 50%, transparent 100%);
+  animation: scan 8s linear infinite;
+}
+@keyframes scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+/* Markdown rendering in Export Guide / reports */
+.prose-hud {
+  color: #dff5ff;
+}
+.prose-hud h1,
+.prose-hud h2,
+.prose-hud h3 {
+  color: #dff5ff;
+  font-family: "Rajdhani", "Orbitron", sans-serif;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.prose-hud h2 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; color: #14f1d9; }
+.prose-hud h3 { font-size: 0.95rem; margin: 1rem 0 0.35rem; color: #7f9bb3; }
+.prose-hud p { color: #c8e1f2; line-height: 1.7; margin: 0.4rem 0; }
+.prose-hud ul { list-style: none; padding-left: 0; }
+.prose-hud li {
+  position: relative;
+  padding-left: 1.25rem;
+  margin: 0.3rem 0;
+  color: #c8e1f2;
+}
+.prose-hud li::before {
+  content: "▸";
+  position: absolute;
+  left: 0;
+  color: #00ffc8;
+}
+.prose-hud code {
+  background: rgba(0, 255, 200, 0.08);
+  color: #14f1d9;
+  border: 1px solid rgba(0, 255, 200, 0.2);
+  border-radius: 0.25rem;
+  padding: 0.05rem 0.35rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.85em;
+}
+.prose-hud strong { color: #dff5ff; }
+.prose-hud a { color: #00e5ff; text-decoration: underline; text-decoration-color: rgba(0,229,255,0.4); }

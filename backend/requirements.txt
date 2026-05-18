@@ -1,0 +1,25 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.7.0
+
+sqlalchemy[asyncio]==2.0.36
+aiosqlite==0.20.0
+alembic==1.14.0
+
+python-multipart==0.0.20
+httpx==0.28.1
+
+# Vector store
+chromadb==0.5.23
+
+# Knowledge graph
+neo4j==5.27.0
+
+# LLM SDKs (OpenAI client also drives xAI / Grok via base_url override)
+openai==1.58.1
+anthropic==0.42.0
+
+# Utilities
+python-json-logger==2.0.7
+orjson==3.10.12
