@@ -50,9 +50,13 @@ Configurable via `SCAFFOLD_MODEL` / `HARD_MODEL`. Off → single `LLM_MODEL` eve
 keys on disk, fully local-first. Also supported: `anthropic`, `openai`, `grok`/`xai`,
 `ollama` (local models).
 
-## Remote input extraction
+## Local source connectors
 
-The system can pull its own inputs — no manual export/upload:
+For AI tools that write conversation logs on this machine, the system pulls its
+own inputs — no manual export/upload. (Hosted platforms — ChatGPT, Claude.ai,
+Grok, Gemini, Perplexity — expose no conversation-history API; their data
+arrives via their official export flows and `POST /ingest`. No scraping or
+session-cookie workarounds, by design.)
 
 ```bash
 curl -X POST localhost:8000/ingest/remote -H 'Content-Type: application/json' \
