@@ -25,6 +25,11 @@ services:
       - ANONYMIZED_TELEMETRY=False
       - CHROMA_TELEMETRY_DISABLED=true
       - LLM_PROVIDER=${LLM_PROVIDER:-openai}
+      - FABLE_MODE=${FABLE_MODE:-false}
+      - SCAFFOLD_MODEL=${SCAFFOLD_MODEL:-claude-sonnet-4-6}
+      - HARD_MODEL=${HARD_MODEL:-claude-fable-5}
+      - LLM_MAX_CONCURRENCY=${LLM_MAX_CONCURRENCY:-3}
+      - INGEST_ALLOWED_ROOTS=${INGEST_ALLOWED_ROOTS:-/ingest-sources}
       - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
       - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-openai}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL:-text-embedding-3-small}

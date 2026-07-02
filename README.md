@@ -1,71 +1,117 @@
 # AI Mirror
 
-Privacy-first, local-first personal second-brain and self-reflection engine. Ingests conversation history from every major AI platform, normalises it, builds a knowledge graph and embeddings, and delivers natural-language analysis of your own thinking.
+Privacy-first, local-first personal second-brain and self-reflection engine. It ingests your conversation history from every major AI platform (or pulls it itself from local sources), normalises it, builds temporal tables + a knowledge graph + embeddings, and delivers **evidence-verified, adversarially-reviewed** analysis of your own thinking.
 
-> **Status:** Scaffolding complete. See `docs/SPEC.md` for the canonical product specification (v1.1).
+> **Status:** v2 — this repo is the actual running system, not a build spec. The original
+> spec-kernel that seeded v1 is preserved at `docs/SPEC.md`; the v2 design rationale is
+> `docs/DESIGN-V2_2026-07-02.md`.
 
-## Quick start
+## Why v2 exists
+
+v1's analysis was a single LLM call over recent messages: it could flatter, it could invent
+"evidence," and when challenged it had nothing to stand on. v2 makes both failure modes
+structural non-options:
+
+- **Grounded claims.** Every report block carries claims with evidence quotes citing real
+  message ids. The backend verifies each quote against the actual message row; invented
+  quotes are discarded and the claim is demoted and tagged `ungrounded`. Evidence chips in
+  the UI link to the real conversation.
+- **Adversarial review.** A second, independent LLM pass tries to *refute* the draft —
+  sycophancy, overreach, unsupported psychology, tone drift. Its verdicts ship with the
+  report as a first-class "Adversarial Review" block, and high-severity objections demote
+  the claims they hit. Register contract: candid, warm-neutral, evidence-first.
+- **Temporal engine.** Deterministic monthly epoch tables (SQL, no LLM) + cached LLM epoch
+  profiles + synthesized trajectories where extrapolated points are explicitly marked
+  `SYNTHETIC` with confidence bands. Growth claims reason from the tables, not vibes.
+- **Meta-analysis.** Compare mirror runs over time: stable traits (test-retest), genuine
+  change, and narrative variance (model noise dressed as change).
+- **Unrealized opportunities.** Dropped threads (conversations that ended on your open
+  question), aptitudes never exploited, cross-domain transfer you haven't made.
+- **Honest empty states.** No LLM configured → an explicit NOT-ANALYZED banner, never
+  placeholder prose styled like insight.
+
+## Fable mode (tiered models)
+
+`FABLE_MODE=true` (or `{"fable": true}` per request) routes **scaffold** work
+(conversation summaries, epoch profiles, KG extraction) to a fast model and **hard** work
+(report synthesis, trajectories, meta-analysis, the adversarial critique) to the strongest
+one:
+
+| tier | default model |
+|---|---|
+| scaffold | `claude-sonnet-4-6` |
+| hard | `claude-fable-5` |
+
+Configurable via `SCAFFOLD_MODEL` / `HARD_MODEL`. Off → single `LLM_MODEL` everywhere.
+
+## LLM providers
+
+`claude_cli` (default) shells out to a local `claude` binary — subscription OAuth, zero API
+keys on disk, fully local-first. Also supported: `anthropic`, `openai`, `grok`/`xai`,
+`ollama` (local models).
+
+## Remote input extraction
+
+The system can pull its own inputs — no manual export/upload:
 
 ```bash
-cp .env.example .env
-docker compose up --build backend neo4j
+curl -X POST localhost:8000/ingest/remote -H 'Content-Type: application/json' \
+  -d '{"connector": "claude_code", "limit": 50}'
 ```
 
-Backend API will be available at <http://localhost:8000>, OpenAPI docs at <http://localhost:8000/docs>, Neo4j browser at <http://localhost:7474>.
+Connectors: `claude_code` (`~/.claude/projects/**/*.jsonl`), `openclaw` (OpenClaw v3
+session logs), `path` (any directory **under the `INGEST_ALLOWED_ROOTS` allow-list** —
+anything outside is rejected). Manual exports still work via `POST /ingest` for ChatGPT,
+Claude, Grok, Gemini, Perplexity, and local models.
 
-To enable the optional local-LLM profile:
+## Quick start (native, local-first)
 
 ```bash
-docker compose --profile local-llm up
+cp .env.example .env                      # default provider: claude_cli
+cd backend && python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+# in another shell:
+cd frontend && npm install && npm run dev # http://localhost:5173
 ```
 
-The frontend (built in Phase 2) lives under `./frontend` and runs on <http://localhost:5173>.
+Docker (API-key providers; the `claude_cli` provider needs the native run):
 
-## Architecture
+```bash
+docker compose up --build backend
+docker compose --profile frontend up     # optional UI container
+docker compose --profile neo4j up        # optional graph mirror
+docker compose --profile local-llm up    # optional Ollama
+```
 
-- **Backend** — FastAPI + SQLAlchemy 2.0 (async) + Alembic, SQLite as primary datastore.
-- **Vector store** — ChromaDB (embedded, persisted to `./backend/data/chroma`).
-- **Knowledge graph** — Neo4j Community via Bolt, with a SQLite triple-store fallback.
-- **AI framework** — LlamaIndex for GraphRAG + structured JSON output.
-- **LLM** — Configurable: OpenAI, Anthropic, or local Ollama.
-- **Frontend** — React 19 + Vite + TypeScript + Tailwind + shadcn/ui (sci-fi HUD).
-
-## Endpoints (v1)
+## Endpoints (v2)
 
 | Method | Path | Purpose |
 |---|---|---|
 | POST | `/ingest` | Upload + parse exported conversation archives |
+| POST | `/ingest/remote` | Pull inputs from local sources (allow-listed roots) |
+| POST | `/reports/full-mirror` | Full Mirror report — claims, verified evidence, critique |
+| POST | `/reports/advanced-abstract` | Abstract synthesis (same grounding contract) |
+| POST | `/reports/meta-analysis` | Compare the last N mirror runs |
 | POST | `/focus-lens` | Natural-language selective analysis |
-| POST | `/reports/full-mirror` | Generate the comprehensive Full Mirror report |
-| POST | `/reports/advanced-abstract` | Generate Advanced Abstract Analysis |
-| GET  | `/dashboard/summary` | LAST MIRROR RUN panel + gauges |
-| POST | `/chat/history` | Persistent GraphRAG chat over history |
-| GET  | `/export-guide` | Latest export instructions (per-platform) |
+| GET  | `/temporal/epochs` | Deterministic epoch tables + LLM epoch profiles |
+| POST | `/temporal/refresh` | Recompute stats, profile new epochs |
+| POST/GET | `/temporal/trajectories` | Synthesize / fetch observed+extrapolated series |
+| GET  | `/dashboard/summary` | Last-run panel + gauges |
+| POST | `/chat/history` | Chat over your history (vector retrieval) |
+| GET  | `/export-guide` | Per-platform export instructions |
 
-See `/docs` (Swagger UI) on the running backend for full schemas.
+Full schemas: Swagger UI at `/docs` on the running backend.
 
-## Project layout
+## Architecture
 
-```
-ai-mirror/
-├── docker-compose.yml
-├── .env.example
-├── backend/
-│   ├── Dockerfile
-│   ├── requirements.txt
-│   ├── alembic.ini
-│   ├── alembic/
-│   └── app/
-│       ├── main.py
-│       ├── config.py
-│       ├── database.py
-│       ├── models/         # SQLAlchemy 2.0 models
-│       ├── schemas/        # Pydantic v2 schemas
-│       ├── routers/        # FastAPI routers (one per endpoint group)
-│       ├── services/       # LLM, embeddings, KG, ingestion, reports
-│       └── utils/
-└── frontend/               # Phase 2 — React 19 HUD
-```
+- **Backend** — FastAPI + SQLAlchemy 2.0 (async) + SQLite. Analysis engine v2 in
+  `backend/app/services/analysis_v2.py` (grounding gate, corpus assembly, critique,
+  meta-analysis) and `temporal.py` (epoch stats/profiles/trajectories).
+- **Vector store** — ChromaDB embedded (bundled local embedding model).
+- **Knowledge graph** — SQLite triples (Neo4j optional write-mirror).
+- **Frontend** — React 19 + Vite + TS + Tailwind, sci-fi HUD. Claims, confidence badges,
+  verified-evidence links, critique panel, trajectory sparklines (observed solid /
+  synthetic dashed + band).
 
 ## License
 

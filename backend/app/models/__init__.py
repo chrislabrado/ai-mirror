@@ -5,6 +5,7 @@ Importing this module registers all mappers with the Declarative `Base`.
 
 from app.models.conversation import Conversation, Source
 from app.models.entity import Entity, Relationship
+from app.models.epoch import EpochProfile, Trajectory
 from app.models.ingestion_job import IngestionJob
 from app.models.message import Message
 from app.models.report import Report, ReportBlock
@@ -18,4 +19,6 @@ __all__ = [
     "Report",
     "ReportBlock",
     "IngestionJob",
+    "EpochProfile",
+    "Trajectory",
 ]

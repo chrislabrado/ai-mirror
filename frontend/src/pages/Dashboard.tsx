@@ -7,26 +7,32 @@ import {
   RefreshCw,
   Search,
   Telescope,
+  TrendingUp,
   UploadCloud,
 } from "lucide-react";
 
 import { ActionButton } from "@/components/ActionButton";
 import { HoloPanel } from "@/components/HoloPanel";
 import { IngestDropzone } from "@/components/IngestDropzone";
+import { RemotePullControl } from "@/components/RemotePullControl";
 import { ReportResultModal } from "@/components/ReportResultModal";
+import { TrajectorySparklines } from "@/components/TrajectorySparklines";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { api } from "@/lib/api";
-import type { DashboardSummary, ReportResponse } from "@/types/api";
+import { ApiError, api } from "@/lib/api";
+import type { DashboardSummary, ReportResponse, TrajectoryMetric } from "@/types/api";
 
-type Loading = null | "full" | "abstract" | "refresh";
+type Loading = null | "full" | "abstract" | "meta" | "refresh";
 
 export function Dashboard() {
   const navigate = useNavigate();
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [metaError, setMetaError] = useState<string | null>(null);
   const [loading, setLoading] = useState<Loading>(null);
   const [resultReport, setResultReport] = useState<ReportResponse | null>(null);
   const [resultDownloadable, setResultDownloadable] = useState(false);
+  const [trajectories, setTrajectories] = useState<TrajectoryMetric[]>([]);
+  const [lastReportPlaceholder, setLastReportPlaceholder] = useState(false);
 
   const refresh = async () => {
     try {
@@ -36,10 +42,29 @@ export function Dashboard() {
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Unable to reach backend.");
     }
+    // Honesty check: if the latest report ran without a model, its bullets are
+    // placeholder text, not insight — tag it as such.
+    try {
+      const reports = await api.listReports({ limit: 1 });
+      setLastReportPlaceholder(reports.items.length > 0 && reports.items[0].model_used === null);
+    } catch {
+      setLastReportPlaceholder(false);
+    }
+  };
+
+  const loadTrajectories = async () => {
+    try {
+      setTrajectories(await api.listTrajectories());
+    } catch {
+      // No temporal data yet — the panel shows its empty state.
+      setTrajectories([]);
+    }
   };
 
   useEffect(() => {
     refresh();
+    loadTrajectories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const runFullMirror = async () => {
@@ -79,6 +104,24 @@ export function Dashboard() {
     }
   };
 
+  const runMetaAnalysis = async () => {
+    setLoading("meta");
+    setMetaError(null);
+    try {
+      const report = await api.metaAnalysis();
+      navigate(`/insights/reports/${report.report_id}`);
+    } catch (exc) {
+      if (exc instanceof ApiError && exc.status === 400) {
+        // Typically "needs at least two prior runs to compare".
+        setMetaError(exc.detail || "Meta-analysis needs at least two prior report runs to compare.");
+      } else {
+        setError(exc instanceof Error ? exc.message : "Meta-Analysis run failed.");
+      }
+    } finally {
+      setLoading(null);
+    }
+  };
+
   const handleManualDownload = async () => {
     if (!resultReport) return;
     try {
@@ -90,8 +133,16 @@ export function Dashboard() {
 
   const refreshInsights = async () => {
     setLoading("refresh");
-    await refresh();
-    setLoading(null);
+    try {
+      await api.temporalRefresh();
+      await api.synthesizeTrajectories();
+      await loadTrajectories();
+      await refresh();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Insight refresh failed.");
+    } finally {
+      setLoading(null);
+    }
   };
 
   const totals = summary && (
@@ -128,10 +179,11 @@ export function Dashboard() {
         lastRunAt={summary?.last_run_at ?? null}
         bullets={summary?.bullets ?? []}
         gauges={summary?.gauges ?? null}
+        notAnalyzed={lastReportPlaceholder}
       />
 
-      {/* Spec §6.1: five large neon-bordered action buttons in a row */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+      {/* Spec §6.1: large neon-bordered action buttons in a row (now six) */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3 xl:grid-cols-6">
         <ActionButton
           icon={Search}
           title="Full Mirror Analysis"
@@ -145,6 +197,13 @@ export function Dashboard() {
           subtitle="Meta-pattern synthesis"
           loading={loading === "abstract"}
           onClick={runAdvancedAbstract}
+        />
+        <ActionButton
+          icon={Compass}
+          title="Meta-Analysis"
+          subtitle="Compare prior runs"
+          loading={loading === "meta"}
+          onClick={runMetaAnalysis}
         />
         <ActionButton
           icon={MessagesSquare}
@@ -161,20 +220,47 @@ export function Dashboard() {
         <ActionButton
           icon={RefreshCw}
           title="Refresh Insights"
-          subtitle="Re-poll the kernel"
+          subtitle="Rebuild temporal model"
           loading={loading === "refresh"}
           onClick={refreshInsights}
         />
       </div>
 
-      {/* Ingest dropzone */}
+      {/* Meta-analysis precondition failure — readable, not a stack trace */}
+      {metaError && (
+        <div className="rounded-md border border-hud-warn/40 bg-hud-warn/5 px-4 py-3 font-mono text-[12px] text-hud-warn">
+          Meta-Analysis unavailable: {metaError}
+        </div>
+      )}
+
+      {/* Temporal trajectories — observed solid, extrapolated dashed + SYNTHETIC */}
+      <Card>
+        <CardHeader className="flex flex-row items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-hud-glow" />
+          <CardTitle>Trajectories</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {trajectories.length === 0 ? (
+            <p className="py-6 text-center font-mono text-[12px] uppercase tracking-[0.2em] text-hud-textFaint">
+              No temporal data — run Refresh Insights
+            </p>
+          ) : (
+            <TrajectorySparklines metrics={trajectories} maxMetrics={6} />
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Ingest dropzone + local connector pull */}
       <Card>
         <CardHeader className="flex flex-row items-center gap-2">
           <UploadCloud className="h-4 w-4 text-hud-glow" />
           <CardTitle>Ingest Conversations</CardTitle>
         </CardHeader>
         <CardContent>
-          <IngestDropzone onIngestComplete={refresh} />
+          <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+            <IngestDropzone onIngestComplete={refresh} />
+            <RemotePullControl onComplete={refresh} />
+          </div>
         </CardContent>
       </Card>
 

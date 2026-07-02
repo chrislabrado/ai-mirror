@@ -43,7 +43,7 @@ async def answer_history_chat(
 
     if not llm_available():
         reply = (
-            "I haven't been configured with an LLM yet, sir. Set `LLM_PROVIDER` "
+            "I haven't been configured with an LLM yet. Set `LLM_PROVIDER` "
             "and an API key (or enable the `local-llm` profile) to talk to your "
             "history."
         )

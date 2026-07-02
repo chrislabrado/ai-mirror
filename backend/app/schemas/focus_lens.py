@@ -13,6 +13,7 @@ class FocusLensRequest(BaseModel):
     date_to: datetime | None = None
     sources: list[str] | None = None
     max_evidence: int = Field(default=12, ge=1, le=50)
+    fable: bool | None = None
 
 
 class FocusLensResponse(BaseModel):

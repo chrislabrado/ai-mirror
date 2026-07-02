@@ -57,6 +57,60 @@ export interface FocusLensRequest {
   date_to?: string | null;
   sources?: string[] | null;
   max_evidence?: number;
+  fable?: boolean | null;
+}
+
+export interface MetaAnalysisRequest {
+  compare_last?: number;
+  fable?: boolean | null;
+}
+
+// --- Claims / grounding (structured.claims on report blocks) ---
+export interface ClaimEvidence {
+  message_id: number;
+  quote: string;
+  verified?: boolean;
+  conversation_id?: number;
+  message_at?: string | null;
+  source_slug?: string | null;
+}
+
+export interface ClaimAnnotation {
+  issue: string;
+  severity: string;
+  note: string;
+}
+
+export interface Claim {
+  claim: string;
+  confidence: "high" | "medium" | "low";
+  evidence: ClaimEvidence[];
+  counter_evidence?: string | null;
+  ungrounded?: boolean;
+  annotations?: ClaimAnnotation[];
+}
+
+// --- Adversarial critique block (block_type "critique") ---
+export interface CritiqueVerdict {
+  target: string;
+  issue: string;
+  severity: string;
+  note: string;
+}
+
+export interface Critique {
+  verdicts: CritiqueVerdict[];
+  overall: string;
+  sycophancy_score: number;
+  balance_score: number;
+}
+
+export interface GroundingStats {
+  total_claims: number;
+  grounded_claims: number;
+  grounding_ratio: number;
+  verified_evidence: number;
+  total_evidence: number;
 }
 
 export interface FocusLensResponse {
@@ -96,6 +150,14 @@ export interface ExportGuide {
   intro: string;
   footer_note: string;
   platforms: ExportPlatform[];
+}
+
+export interface RemoteIngestRequest {
+  connector: "claude_code" | "openclaw" | "path";
+  path?: string;
+  since?: string;
+  limit?: number;
+  label?: string;
 }
 
 export interface IngestResponse {
@@ -240,6 +302,66 @@ export interface InsightsAggregated {
   total_reports: number;
   total_blocks: number;
   blocks: AggregatedBlock[];
+}
+
+// --- Temporal epochs & trajectories ---
+export interface EpochStats {
+  conversations: number;
+  messages: number;
+  user_messages: number;
+  assistant_messages: number;
+  avg_user_msg_chars: number;
+  question_ratio: number;
+  active_days: number;
+  per_source?: Record<string, number>;
+}
+
+export interface EpochProfile {
+  themes: string[];
+  focus: string;
+  sophistication: number;
+  delegation: number;
+  valence: number;
+  shifts: string;
+}
+
+export interface TemporalEpoch {
+  /** YYYY-MM */
+  epoch: string;
+  stats: EpochStats;
+  profile: EpochProfile | null;
+  model_used: string | null;
+}
+
+export interface TemporalRefreshRequest {
+  fable?: boolean | null;
+  force?: boolean;
+}
+
+export interface TemporalRefreshResponse {
+  epochs_total: number;
+  epochs_profiled: number;
+  duration_seconds: number;
+}
+
+export interface TrajectoryPoint {
+  epoch: string;
+  value: number;
+  kind: "observed" | "extrapolated";
+  ci_low?: number;
+  ci_high?: number;
+}
+
+/** Metric "__abstraction__" carries the global abstraction narrative. */
+export const ABSTRACTION_METRIC = "__abstraction__";
+
+export interface TrajectoryMetric {
+  metric: string;
+  series: TrajectoryPoint[];
+  narrative: string | null;
+  assumptions: string[] | null;
+  model_used: string | null;
+  created_at: string;
 }
 
 // --- Deep Dive ---

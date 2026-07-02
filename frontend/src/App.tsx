@@ -10,6 +10,7 @@ import { ReportsListPage } from "@/pages/ReportsList";
 import { ReportViewerPage } from "@/pages/ReportViewer";
 import { KnowledgeGraphPage } from "@/pages/KnowledgeGraph";
 import { QueriesPage } from "@/pages/Queries";
+import { TrajectoriesPage } from "@/pages/Trajectories";
 
 export default function App() {
   return (
@@ -21,6 +22,7 @@ export default function App() {
         <Route path="/insights" element={<InsightsPage />} />
         <Route path="/insights/reports" element={<ReportsListPage />} />
         <Route path="/insights/reports/:id" element={<ReportViewerPage />} />
+        <Route path="/trajectories" element={<TrajectoriesPage />} />
         <Route path="/graph" element={<KnowledgeGraphPage />} />
         <Route path="/queries" element={<QueriesPage />} />
         <Route path="/focus-lens" element={<FocusLensPage />} />

@@ -1,3 +1,4 @@
+import { getFable } from "@/lib/fable";
 import type {
   ChatHistoryResponse,
   ChatMessage,
@@ -14,19 +15,55 @@ import type {
   IngestResponse,
   InsightsAggregated,
   KGGraph,
+  MetaAnalysisRequest,
+  RemoteIngestRequest,
   ReportListResponse,
   ReportResponse,
+  TemporalEpoch,
+  TemporalRefreshRequest,
+  TemporalRefreshResponse,
+  TrajectoryMetric,
 } from "@/types/api";
 
-const RAW_BASE = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "";
+// Default: backend on port 8000 of whatever host is serving the UI
+// (works for localhost and LAN access alike). Override with VITE_API_BASE_URL.
+const RAW_BASE =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  (typeof window !== "undefined" ? `http://${window.location.hostname}:8000` : "");
 const BASE = RAW_BASE.replace(/\/$/, "");
+
+/** Error carrying the HTTP status + a human-readable detail extracted from the body. */
+export class ApiError extends Error {
+  status: number;
+  detail: string;
+
+  constructor(status: number, statusText: string, detail: string) {
+    super(`API ${status} ${statusText}: ${detail}`);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
+function extractDetail(text: string): string {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object") {
+      const detail = (parsed as Record<string, unknown>).detail;
+      if (typeof detail === "string") return detail;
+    }
+  } catch {
+    // Not JSON — fall through to raw text.
+  }
+  return text;
+}
 
 async function request<T>(
   path: string,
   init?: RequestInit & { json?: unknown },
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" };
-  let body: BodyInit | undefined = init?.body;
+  let body: BodyInit | undefined = init?.body ?? undefined;
   if (init?.json !== undefined) {
     headers["Content-Type"] = "application/json";
     body = JSON.stringify(init.json);
@@ -34,10 +71,28 @@ async function request<T>(
   const resp = await fetch(`${BASE}${path}`, { ...init, headers: { ...headers, ...init?.headers }, body });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
-    throw new Error(`API ${resp.status} ${resp.statusText}: ${text || path}`);
+    throw new ApiError(resp.status, resp.statusText, extractDetail(text) || path);
   }
   if (resp.status === 204) return undefined as T;
   return (await resp.json()) as T;
+}
+
+/**
+ * Tolerant list unwrap — some endpoints return a bare array, others wrap it
+ * ({trajectories: [...]}, {epochs: [...]}, {items: [...]}). Accept all.
+ */
+function unwrapList<T>(data: unknown, keys: string[]): T[] {
+  if (Array.isArray(data)) return data as T[];
+  if (data && typeof data === "object") {
+    const rec = data as Record<string, unknown>;
+    for (const key of keys) {
+      if (Array.isArray(rec[key])) return rec[key] as T[];
+    }
+    for (const value of Object.values(rec)) {
+      if (Array.isArray(value)) return value as T[];
+    }
+  }
+  return [];
 }
 
 function qs(params: Record<string, string | number | undefined | null>): string {
@@ -54,12 +109,26 @@ export const api = {
   health: () => request<{ status: string; version: string }>("/healthz"),
   dashboardSummary: () => request<DashboardSummary>("/dashboard/summary"),
   exportGuide: () => request<ExportGuide>("/export-guide"),
-  fullMirror: (payload: { notes?: string } = {}) =>
-    request<ReportResponse>("/reports/full-mirror", { method: "POST", json: payload }),
-  advancedAbstract: (payload: { notes?: string } = {}) =>
-    request<ReportResponse>("/reports/advanced-abstract", { method: "POST", json: payload }),
+  fullMirror: (payload: { notes?: string; fable?: boolean | null } = {}) =>
+    request<ReportResponse>("/reports/full-mirror", {
+      method: "POST",
+      json: { fable: getFable(), ...payload },
+    }),
+  advancedAbstract: (payload: { notes?: string; fable?: boolean | null } = {}) =>
+    request<ReportResponse>("/reports/advanced-abstract", {
+      method: "POST",
+      json: { fable: getFable(), ...payload },
+    }),
+  metaAnalysis: (payload: MetaAnalysisRequest = {}) =>
+    request<ReportResponse>("/reports/meta-analysis", {
+      method: "POST",
+      json: { fable: getFable(), ...payload },
+    }),
   focusLens: (payload: FocusLensRequest) =>
-    request<FocusLensResponse>("/focus-lens", { method: "POST", json: payload }),
+    request<FocusLensResponse>("/focus-lens", {
+      method: "POST",
+      json: { fable: getFable(), ...payload },
+    }),
   chatHistory: (payload: { session_id?: string; messages: ChatMessage[]; top_k?: number }) =>
     request<ChatHistoryResponse>("/chat/history", { method: "POST", json: payload }),
   ingest: async (file: File, source: string = "auto", label?: string) => {
@@ -69,6 +138,33 @@ export const api = {
     if (label) fd.append("label", label);
     return request<IngestResponse>("/ingest", { method: "POST", body: fd });
   },
+  ingestRemote: (payload: RemoteIngestRequest) =>
+    request<IngestResponse>("/ingest/remote", { method: "POST", json: payload }),
+
+  // Temporal
+  temporalEpochs: async (): Promise<TemporalEpoch[]> =>
+    unwrapList<TemporalEpoch>(await request<unknown>("/temporal/epochs"), ["epochs"]),
+  temporalRefresh: (payload: TemporalRefreshRequest = {}) =>
+    request<TemporalRefreshResponse>("/temporal/refresh", {
+      method: "POST",
+      json: { fable: getFable(), ...payload },
+    }),
+  synthesizeTrajectories: async (
+    payload: { fable?: boolean | null } = {},
+  ): Promise<TrajectoryMetric[]> =>
+    unwrapList<TrajectoryMetric>(
+      await request<unknown>("/temporal/trajectories", {
+        method: "POST",
+        json: { fable: getFable(), ...payload },
+      }),
+      ["trajectories", "items", "metrics"],
+    ),
+  listTrajectories: async (): Promise<TrajectoryMetric[]> =>
+    unwrapList<TrajectoryMetric>(await request<unknown>("/temporal/trajectories"), [
+      "trajectories",
+      "items",
+      "metrics",
+    ]),
 
   // History
   listConversations: (params: { q?: string; source?: string; limit?: number; offset?: number } = {}) =>

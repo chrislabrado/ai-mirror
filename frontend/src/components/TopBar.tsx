@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Circle } from "lucide-react";
+import { FableToggle } from "@/components/FableToggle";
 import { api } from "@/lib/api";
 
 export function TopBar() {
@@ -40,10 +41,13 @@ export function TopBar() {
           day: "2-digit",
         })}
       </div>
-      <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.3em]">
-        <Circle className={`h-2 w-2 fill-current ${colour}`} />
-        <span className={colour}>{label}</span>
-        {version && <span className="text-hud-textFaint">· kernel {version}</span>}
+      <div className="flex items-center gap-5">
+        <FableToggle />
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.3em]">
+          <Circle className={`h-2 w-2 fill-current ${colour}`} />
+          <span className={colour}>{label}</span>
+          {version && <span className="text-hud-textFaint">· kernel {version}</span>}
+        </div>
       </div>
     </header>
   );

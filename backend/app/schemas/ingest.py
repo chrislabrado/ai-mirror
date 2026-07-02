@@ -9,6 +9,7 @@ SourceSlug = Literal[
     "chatgpt",
     "claude",
     "claude_code",
+    "openclaw",
     "grok",
     "gemini",
     "perplexity",
@@ -21,6 +22,19 @@ class IngestRequest(BaseModel):
     """Companion payload for an upload — sent as a multipart form field."""
 
     source: SourceSlug = "auto"
+    label: str | None = None
+
+
+RemoteConnector = Literal["claude_code", "openclaw", "path"]
+
+
+class RemoteIngestRequest(BaseModel):
+    """Payload for /ingest/remote — pull conversations straight from disk."""
+
+    connector: RemoteConnector
+    path: str | None = None
+    since: datetime | None = None
+    limit: int | None = None
     label: str | None = None
 
 

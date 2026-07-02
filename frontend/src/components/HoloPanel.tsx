@@ -8,10 +8,12 @@ interface HoloPanelProps {
   lastRunAt: string | null;
   bullets: string[];
   gauges: GaugeSet | null;
+  /** True when the last report was generated without a model (placeholder, not insight). */
+  notAnalyzed?: boolean;
 }
 
 /** Top-right holographic LAST MIRROR RUN panel + three semi-circular gauges. */
-export function HoloPanel({ lastRunAt, bullets, gauges }: HoloPanelProps) {
+export function HoloPanel({ lastRunAt, bullets, gauges, notAnalyzed }: HoloPanelProps) {
   const safeBullets = (bullets ?? []).slice(0, 5);
 
   return (
@@ -22,6 +24,14 @@ export function HoloPanel({ lastRunAt, bullets, gauges }: HoloPanelProps) {
           <span className="font-display text-[11px] uppercase tracking-[0.32em] text-hud-textDim">
             Last Mirror Run
           </span>
+          {notAnalyzed && (
+            <span
+              className="rounded-sm border border-hud-line px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-hud-textFaint"
+              title="The last report was generated without a model — its content is a placeholder, not insight."
+            >
+              Not analyzed — placeholder
+            </span>
+          )}
         </div>
         <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-hud-textFaint">
           {fmtDate(lastRunAt)}

@@ -13,12 +13,13 @@ from app.database import get_db
 from app.models.report import Report
 from app.schemas.common import GaugeSet, ReportBlockOut
 from app.schemas.reports import (
+    MetaAnalysisRequest,
     ReportListItem,
     ReportListResponse,
     ReportRequest,
     ReportResponse,
 )
-from app.services.reports import run_advanced_abstract, run_full_mirror
+from app.services.reports import run_advanced_abstract, run_full_mirror, run_meta_analysis
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
@@ -41,9 +42,18 @@ async def advanced_abstract(
     return await run_advanced_abstract(db=db, request=payload)
 
 
+@router.post("/meta-analysis", response_model=ReportResponse)
+async def meta_analysis(
+    payload: MetaAnalysisRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ReportResponse:
+    """Compare the last N Full Mirror runs: stability vs drift vs model noise."""
+    return await run_meta_analysis(db=db, request=payload)
+
+
 @router.get("", response_model=ReportListResponse)
 async def list_reports(
-    kind: Literal["full_mirror", "advanced_abstract", "focus_lens"] | None = Query(
+    kind: Literal["full_mirror", "advanced_abstract", "focus_lens", "deep_dive", "meta_analysis"] | None = Query(
         default=None, description="Optional report kind filter."
     ),
     limit: int = Query(default=50, ge=1, le=500),

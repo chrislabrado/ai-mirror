@@ -28,6 +28,7 @@ from app.services.ingestion.claude_code import ClaudeCodeIngestor
 from app.services.ingestion.gemini import GeminiIngestor
 from app.services.ingestion.grok import GrokIngestor
 from app.services.ingestion.local import LocalModelIngestor
+from app.services.ingestion.openclaw import OpenClawIngestor
 from app.services.ingestion.perplexity import PerplexityIngestor
 from app.utils.logger import get_logger
 
@@ -38,6 +39,7 @@ _INGESTORS: dict[str, BaseIngestor] = {
     "chatgpt": ChatGPTIngestor(),
     "claude": ClaudeIngestor(),
     "claude_code": ClaudeCodeIngestor(),
+    "openclaw": OpenClawIngestor(),
     "grok": GrokIngestor(),
     "gemini": GeminiIngestor(),
     "perplexity": PerplexityIngestor(),
@@ -47,7 +49,7 @@ _INGESTORS: dict[str, BaseIngestor] = {
 
 def _detect(file: Path) -> BaseIngestor | None:
     try:
-        head = file.read_text(encoding="utf-8", errors="ignore")[:4096]
+        head = file.read_text(encoding="utf-8", errors="ignore")[:65536]
     except OSError:
         return None
     for ing in _INGESTORS.values():

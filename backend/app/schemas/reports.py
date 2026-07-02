@@ -12,6 +12,19 @@ class ReportRequest(BaseModel):
     date_to: datetime | None = None
     sources: list[str] | None = None
     notes: str | None = Field(default=None, max_length=2048)
+    fable: bool | None = Field(
+        default=None,
+        description=(
+            "Tiered-model override: true forces fable mode (scaffold model for "
+            "mechanical passes, hard model for synthesis/critique), false forces "
+            "single-model, null uses the FABLE_MODE server setting."
+        ),
+    )
+
+
+class MetaAnalysisRequest(BaseModel):
+    compare_last: int = Field(default=5, ge=2, le=20)
+    fable: bool | None = None
 
 
 class ReportResponse(BaseModel):

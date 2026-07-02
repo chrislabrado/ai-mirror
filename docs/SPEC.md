@@ -1,3 +1,7 @@
+> **Historical document.** This is the v1.1 spec-kernel that seeded the original build —
+> the "meta prompt that builds a system." The repo now contains the actual system; current
+> behaviour is documented in `README.md` and `docs/DESIGN-V2_2026-07-02.md`.
+
 # AI Mirror — Complete Project Specification (Kernel Version)
 
 **Version:** 1.1 (May 17, 2026)

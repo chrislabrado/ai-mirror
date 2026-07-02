@@ -21,8 +21,18 @@ from app.models.report import Report, ReportBlock
 from app.schemas.common import Evidence, GaugeSet, ReportBlockOut
 from app.schemas.focus_lens import FocusLensRequest, FocusLensResponse
 from app.schemas.insights import DeepDiveRequest, DeepDiveResponse
-from app.schemas.reports import ReportRequest, ReportResponse
-from app.services.llm import LLMUnavailable, chat_json, llm_available
+from app.schemas.reports import MetaAnalysisRequest, ReportRequest, ReportResponse
+from app.services.analysis_v2 import (
+    CLAIMS_SCHEMA_HINT,
+    build_corpus,
+    build_critique_block,
+    build_run_digests,
+    calibrate_gauges,
+    dropped_thread_candidates,
+    run_critique,
+    verify_claims,
+)
+from app.services.llm import LLMUnavailable, chat_json, llm_available, resolve_model
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -215,7 +225,15 @@ FULL_MIRROR_BLOCKS: list[tuple[str, str]] = [
     ("recurring_themes", "Recurring Themes"),
     ("growth_arc", "Growth Arc Over Time"),
     ("blind_spots", "Blind Spots"),
+    ("unrealized_opportunities", "Unrealized Opportunities"),
     ("actionable_insights", "Actionable Insights"),
+]
+
+META_ANALYSIS_BLOCKS: list[tuple[str, str]] = [
+    ("stability_map", "Stability Map"),
+    ("drift", "What Actually Changed"),
+    ("narrative_variance", "Model Noise vs Real Change"),
+    ("open_questions", "Open Questions"),
 ]
 
 ABSTRACT_BLOCKS: list[tuple[str, str]] = [
@@ -249,11 +267,24 @@ def _placeholder_blocks(blocks: list[tuple[str, str]]) -> list[dict[str, Any]]:
                 "`LLM_PROVIDER` and an API key (or run the `local-llm` profile) "
                 "to populate this section._"
             ),
-            "structured": None,
+            "structured": {"placeholder": True},
             "evidence": [],
         }
         for slug, heading in blocks
     ]
+
+
+def _model_used(fable: bool | None) -> str | None:
+    """Human-readable model attribution, fable-aware."""
+    if not llm_available():
+        return None
+    fable_on = settings.fable_mode if fable is None else fable
+    if fable_on:
+        return (
+            f"{settings.llm_provider}:{resolve_model('hard', True)}"
+            f"+{resolve_model('scaffold', True)} (fable)"
+        )
+    return f"{settings.llm_provider}:{settings.llm_model}"
 
 
 async def _generate_report(
@@ -269,7 +300,13 @@ async def _generate_report(
     import time as _time
 
     started = _time.monotonic()
-    corpus = await _gather_corpus(db, request)
+    fable = request.fable
+    if llm_available():
+        corpus = await build_corpus(
+            db, date_from=request.date_from, date_to=request.date_to, fable=fable
+        )
+    else:
+        corpus = await _gather_corpus(db, request)
     title = f"{title_prefix} — {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
     log.info(
         "report.start",
@@ -291,59 +328,53 @@ async def _generate_report(
             )
             llm_started = _time.monotonic()
 
-            kg_instruction = ""
-            if extract_kg:
-                kg_instruction = (
-                    "\n- knowledge_graph: REQUIRED rich object with:\n"
-                    "    - entities: array — MUST contain BETWEEN 40 AND 80 entries (less than 40 is "
-                    "considered a failure). Cover broad ground across the corpus: include people the "
-                    "user mentions, every distinct tool / framework / SDK referenced, every project, "
-                    "every recurring concept, every belief or value the user expresses, every trait "
-                    "or pattern, every source platform, every topic of sustained interest.\n"
-                    "      Each entity object: {label, kind, salience, description}\n"
-                    "      - label: short noun phrase (e.g. 'Knowledge Graph', 'Dynatrace', 'Chris')\n"
-                    "      - kind: one of concept | person | tool | project | belief | trait | source | topic\n"
-                    "      - salience: float in [0,1] — how central this entity is to the user's thinking\n"
-                    "      - description: 1-2 sentence factual context grounded in the corpus\n"
-                    "    - relationships: array — CRITICAL DENSITY REQUIREMENT. MUST contain AT LEAST "
-                    "TWO RELATIONSHIPS PER ENTITY on average. If you emit 50 entities, emit AT LEAST "
-                    "100 relationships. If you emit 60 entities, emit AT LEAST 120. EVERY entity MUST "
-                    "appear in at least one relationship — orphaned entities are forbidden. Aim for "
-                    "1.5×–2.5× the entity count.\n"
-                    "      Each relationship object: {subject, predicate, object, weight}\n"
-                    "      - subject and object MUST exactly match labels from the entities array\n"
-                    "      - predicate: snake_case verb phrase (e.g. 'is_building', 'depends_on',\n"
-                    "        'critiques', 'uses', 'is_motivated_by', 'has_aptitude_in', 'frustrated_by',\n"
-                    "        'is_a', 'leverages', 'reflects_on', 'contrasts_with', 'inspired_by',\n"
-                    "        'is_blocked_by', 'co-occurs_with', 'is_an_instance_of')\n"
-                    "      - weight: float in [0,1] — strength of the relationship\n"
-                    "    Required edge patterns to ensure connectivity (in addition to anything "
-                    "domain-specific you find):\n"
-                    "      * connect every tool, project, and source to the person who uses them\n"
-                    "      * connect every belief and trait to the person who holds them\n"
-                    "      * connect every concept to at least one project, tool, or other concept "
-                    "        that it relates to\n"
-                    "      * connect every topic to at least one related concept or source\n"
-                    "    Prioritise BREADTH over depth. Do not over-cluster around a single topic.\n"
-                )
+            opportunity_instruction = ""
+            if any(slug == "unrealized_opportunities" for slug, _ in blocks):
+                candidates = await dropped_thread_candidates(db)
+                if candidates:
+                    cand_lines = "\n".join(
+                        f"  [conv:{c['conversation_id']}] ({c['at'] or '—'}) "
+                        f"{c['title'] or '—'}: last user msg: {c['last_user_message']}"
+                        for c in candidates
+                    )
+                    opportunity_instruction = (
+                        "\n\nFor the unrealized_opportunities block, consider (a) these "
+                        "detected dropped threads — conversations that ended on an open "
+                        "user question:\n" + cand_lines + "\n(b) aptitudes demonstrated "
+                        "but never exploited, (c) cross-domain transfer — patterns "
+                        "mastered in one domain and absent in an adjacent one, (d) "
+                        "questions the user never asked but their trajectory suggests "
+                        "they should."
+                    )
 
             payload = await chat_json(
                 system=system_prompt,
                 user=(
-                    "Analyse the following normalised AI conversation excerpts and "
-                    "produce a structured JSON object containing:\n"
+                    "Analyse the following corpus (epoch tables, conversation index, "
+                    "id-labelled excerpts) and produce a structured JSON object with:\n"
                     "- summary: 4-5 concise bullet observations (one string per bullet, "
                     "joined by newlines)\n"
                     "- gauges: {thought_clarity, self_reflection_depth, aptitude_balance} "
                     "each a float between 0 and 1\n"
-                    "- blocks: array of {block_type, heading, body_markdown, structured, evidence}"
-                    + kg_instruction
+                    "- blocks: array of {block_type, heading, body_markdown, structured, "
+                    "evidence}. Each block's `structured` MUST contain a `claims` array "
+                    f"matching {CLAIMS_SCHEMA_HINT}. RULES: cite only message ids that "
+                    "appear as [msg:<id>] in the corpus; quotes must be verbatim "
+                    "substrings of that message (they are machine-verified — invented "
+                    "quotes are discarded and the claim is demoted); every non-obvious "
+                    "claim needs at least one evidence entry; state counter-evidence "
+                    "honestly (null only when none exists); confidence reflects the "
+                    "evidence, not politeness. Register: candid, warm-neutral, "
+                    "evidence-first — no flattery, no harshness.\n"
+                    "For growth_arc, reason from the EPOCH TABLE trends, not vibes."
+                    + opportunity_instruction
                     + f"\n\nExpected block_types in order: {[b[0] for b in blocks]}\n\n"
-                    f"CORPUS:\n{corpus[:60000]}"
+                    f"CORPUS:\n{corpus}"
                 ),
                 temperature=0.3,
-                # Higher cap for Full Mirror w/ KG extraction (11 blocks + 25-60 entities + 30-80 edges).
-                max_tokens=16384 if extract_kg else 4096,
+                max_tokens=16384,
+                tier="hard",
+                fable=fable,
             )
             llm_duration = round(_time.monotonic() - llm_started, 2)
             log.info(
@@ -355,27 +386,65 @@ async def _generate_report(
                     "blocks_received": len(payload.get("blocks") or []),
                 },
             )
-            summary = payload.get("summary", "").strip()
+            summary = payload.get("summary", "")
+            if isinstance(summary, list):
+                summary = "\n".join(str(s) for s in summary)
+            summary = str(summary).strip()
             gauges_data = payload.get("gauges") or None
-            llm_blocks = payload.get("blocks") or _placeholder_blocks(blocks)
+            llm_blocks = [b for b in (payload.get("blocks") or []) if isinstance(b, dict)]
+            if not llm_blocks:
+                llm_blocks = _placeholder_blocks(blocks)
 
-            # Persist knowledge graph (Full Mirror only)
+            # v2 grounding gate — verify every cited quote against the real rows.
+            grounding = await verify_claims(db, llm_blocks)
+
+            # v2 adversarial critique — the draft must survive its own refutation.
+            try:
+                critique = await run_critique(llm_blocks, corpus[:30_000], fable=fable)
+            except Exception as crit_exc:  # noqa: BLE001
+                log.warning("critique.failed", extra={"error": str(crit_exc)})
+                critique = {
+                    "overall": f"Critique pass failed ({crit_exc}); verdicts unavailable.",
+                    "verdicts": [],
+                }
+            llm_blocks.append(build_critique_block(critique, grounding))
+            gauges_data = calibrate_gauges(gauges_data, grounding, critique)
+
+            # Knowledge-graph extraction (Full Mirror only) — separate scaffold-tier
+            # call so the hard-tier synthesis stays focused on judgment.
             if extract_kg:
-                kg_raw = payload.get("knowledge_graph")
-                if kg_raw is not None:
-                    log.info("kg.extracted", extra={"has_data": bool(kg_raw)})
-                    try:
-                        ent_count, rel_count = await _persist_knowledge_graph(db, kg_raw)
-                        log.info(
-                            "kg.entity_upserted",
-                            extra={"entity_count": ent_count},
-                        )
-                        log.info(
-                            "kg.relationship_upserted",
-                            extra={"relationship_count": rel_count},
-                        )
-                    except Exception as kg_exc:  # noqa: BLE001
-                        log.warning("kg.persistence_failed", extra={"error": str(kg_exc)})
+                try:
+                    kg_payload = await chat_json(
+                        system=(
+                            "You extract a knowledge graph from a personal "
+                            "AI-conversation corpus. Output JSON only."
+                        ),
+                        user=(
+                            "Extract a knowledge graph with:\n"
+                            "- entities: 40-80 entries {label, kind, salience, description}; "
+                            "kind one of concept | person | tool | project | belief | trait "
+                            "| source | topic; salience in [0,1]; description grounded in "
+                            "the corpus.\n"
+                            "- relationships: at least 2 per entity on average, {subject, "
+                            "predicate, object, weight}; subject/object MUST exactly match "
+                            "entity labels; predicate snake_case (uses, is_building, "
+                            "depends_on, is_motivated_by, ...); weight in [0,1]; every "
+                            "entity appears in at least one relationship. Breadth over "
+                            "depth.\n\n"
+                            f"CORPUS:\n{corpus[:60000]}"
+                        ),
+                        temperature=0.2,
+                        max_tokens=16384,
+                        tier="scaffold",
+                        fable=fable,
+                    )
+                    ent_count, rel_count = await _persist_knowledge_graph(db, kg_payload)
+                    log.info(
+                        "kg.persisted",
+                        extra={"entity_count": ent_count, "relationship_count": rel_count},
+                    )
+                except Exception as kg_exc:  # noqa: BLE001
+                    log.warning("kg.extraction_failed", extra={"error": str(kg_exc)})
 
         except (LLMUnavailable, Exception) as exc:  # noqa: BLE001
             log.warning("report.llm_failed", extra={"kind": kind, "error": str(exc)})
@@ -397,7 +466,7 @@ async def _generate_report(
         query=request.notes,
         summary=summary,
         gauges=gauges_data,
-        model_used=f"{settings.llm_provider}:{settings.llm_model}" if llm_available() else None,
+        model_used=_model_used(fable),
     )
     db.add(report)
     await db.flush()
@@ -459,8 +528,10 @@ async def run_full_mirror(*, db: AsyncSession, request: ReportRequest) -> Report
         "You are AI Mirror, a privacy-first self-reflection engine. You analyse "
         "the user's own AI conversation history and produce evidence-based "
         "insights about their thinking patterns, strengths, weaknesses, psychology, "
-        "neurodivergence signals, and aptitudes. Be specific, kind, and grounded "
-        "strictly in the provided corpus. Output JSON only."
+        "neurodivergence signals, and aptitudes. Be specific and grounded strictly "
+        "in the provided corpus. Register contract: candid, warm-neutral, "
+        "evidence-first — flattery and harshness are both failures. Weaknesses get "
+        "the same evidentiary rigor as strengths. Output JSON only."
     )
     return await _generate_report(
         db, "full_mirror", "Full Mirror Analysis", FULL_MIRROR_BLOCKS, request, system_prompt,
@@ -493,8 +564,11 @@ async def run_focus_lens(*, db: AsyncSession, request: FocusLensRequest) -> Focu
     if request.date_to:
         stmt = stmt.where(Message.message_at <= request.date_to)
     rows = (await db.execute(stmt)).scalars().all()
-    corpus = "\n\n---\n\n".join(f"[{m.role}] {m.content[:1200]}" for m in rows)
+    corpus = "\n\n---\n\n".join(
+        f"[msg:{m.id}] [{m.role}] {m.content[:1200]}" for m in rows
+    )
 
+    fable = request.fable
     title = f"Focus Lens — {request.query[:80]}"
     if llm_available() and corpus.strip():
         try:
@@ -502,16 +576,24 @@ async def run_focus_lens(*, db: AsyncSession, request: FocusLensRequest) -> Focu
                 system=(
                     "You are AI Mirror's Focus Lens. Answer the user's targeted "
                     "question using only the supplied corpus. Provide a clear "
-                    "Markdown answer with citations to specific excerpts. "
-                    "Output JSON only with: summary, blocks[{block_type, heading, "
-                    "body_markdown, structured, evidence}]."
+                    "Markdown answer. Output JSON only with: summary, "
+                    "blocks[{block_type, heading, body_markdown, structured, "
+                    "evidence}]. Each block's `structured` MUST contain a `claims` "
+                    f"array matching {CLAIMS_SCHEMA_HINT}; cite only [msg:<id>] ids "
+                    "you saw; quotes must be verbatim (machine-verified). Candid, "
+                    "warm-neutral, evidence-first."
                 ),
                 user=f"QUESTION: {request.query}\n\nCORPUS:\n{corpus[:60000]}",
                 temperature=0.2,
-                max_tokens=3000,
+                max_tokens=4096,
+                tier="hard",
+                fable=fable,
             )
             summary = payload.get("summary", "")
-            blocks_data = payload.get("blocks") or []
+            if isinstance(summary, list):
+                summary = "\n".join(str(s) for s in summary)
+            blocks_data = [b for b in (payload.get("blocks") or []) if isinstance(b, dict)]
+            await verify_claims(db, blocks_data)
         except Exception as exc:  # noqa: BLE001
             log.warning("focus_lens.llm_failed", extra={"error": str(exc)})
             summary = "LLM call failed — placeholder content rendered."
@@ -537,7 +619,7 @@ async def run_focus_lens(*, db: AsyncSession, request: FocusLensRequest) -> Focu
         query=request.query,
         summary=summary,
         gauges=None,
-        model_used=f"{settings.llm_provider}:{settings.llm_model}" if llm_available() else None,
+        model_used=_model_used(fable),
     )
     db.add(report)
     await db.flush()
@@ -709,7 +791,7 @@ async def run_deep_dive(
         query=request.focus_question,
         summary=body_markdown[:500] if body_markdown else None,
         gauges=None,
-        model_used=f"{settings.llm_provider}:{settings.llm_model}" if llm_available() else None,
+        model_used=_model_used(None),
     )
     db.add(deep_dive_report)
     await db.flush()
@@ -752,4 +834,133 @@ async def run_deep_dive(
         model_used=deep_dive_report.model_used,
         duration_seconds=duration,
         created_at=deep_dive_report.created_at,
+    )
+
+
+async def run_meta_analysis(*, db: AsyncSession, request: MetaAnalysisRequest) -> ReportResponse:
+    """Compare the last N full-mirror runs: stability, drift, model noise.
+
+    Evidence here cites *reports*, not messages, so the grounding gate is the
+    digest itself — every input the model saw is stored in the report's
+    structured payload for audit.
+    """
+    from fastapi import HTTPException
+
+    digests = await build_run_digests(db, compare_last=request.compare_last)
+    if len(digests) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Meta-analysis needs at least two Full Mirror runs to compare.",
+        )
+
+    fable = request.fable
+    title = f"Meta-Analysis of {len(digests)} Mirror Runs — {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+
+    import json as _json
+
+    digest_text = _json.dumps(digests, ensure_ascii=False)[:80_000]
+    try:
+        payload = await chat_json(
+            system=(
+                "You are AI Mirror's meta-analyst. You receive digests of several "
+                "prior Full Mirror self-reflection reports about the same person "
+                "(newest first). Separate three things rigorously: (1) traits that "
+                "are STABLE across runs (test-retest reliability), (2) genuine "
+                "CHANGE in the person over time, (3) NARRATIVE VARIANCE — the "
+                "model describing the same facts differently run-to-run, which is "
+                "noise, not change. Candid, warm-neutral, evidence-first; cite "
+                "report ids like [report:12]. Output JSON only."
+            ),
+            user=(
+                "Produce: summary (3-5 bullets joined by newlines) and blocks "
+                "[{block_type, heading, body_markdown, structured, evidence}] with "
+                f"block_types in order: {[b[0] for b in META_ANALYSIS_BLOCKS]}. "
+                "Each block's structured.claims follows "
+                '{claims: [{claim, confidence: "high"|"medium"|"low", '
+                "evidence: [{report_id: int, note: str}], counter_evidence}]}.\n\n"
+                f"RUN DIGESTS (newest first):\n{digest_text}"
+            ),
+            temperature=0.2,
+            max_tokens=8192,
+            tier="hard",
+            fable=fable,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("meta_analysis.llm_failed", extra={"error": str(exc)})
+        raise HTTPException(status_code=503, detail=f"Meta-analysis LLM call failed: {exc}")
+
+    summary = payload.get("summary", "")
+    if isinstance(summary, list):
+        summary = "\n".join(str(s) for s in summary)
+    blocks_data = [b for b in (payload.get("blocks") or []) if isinstance(b, dict)]
+
+    report = Report(
+        kind="meta_analysis",
+        title=title,
+        query=f"compare_last={request.compare_last}",
+        summary=str(summary).strip(),
+        gauges=None,
+        model_used=_model_used(fable),
+    )
+    db.add(report)
+    await db.flush()
+
+    def _report_evidence(value: object) -> list[dict[str, object]] | None:
+        # Meta-analysis evidence cites reports ({report_id, note}); normalise
+        # into the legacy Evidence shape (snippet required).
+        items = _coerce_evidence(value) or []
+        out: list[dict[str, object]] = []
+        for ev in items:
+            if "snippet" not in ev:
+                rid = ev.get("report_id")
+                note = ev.get("note") or ""
+                ev = {"snippet": f"[report:{rid}] {note}".strip()}
+            out.append(ev)
+        return out or None
+
+    inserted: list[ReportBlock] = []
+    for position, block_data in enumerate(blocks_data):
+        structured = _coerce_structured(block_data.get("structured")) or {}
+        if position == 0:
+            # Audit trail: persist exactly which runs were compared.
+            structured["compared_report_ids"] = [d["report_id"] for d in digests]
+        rb = ReportBlock(
+            report_id=report.id,
+            block_type=block_data.get("block_type", f"block_{position}"),
+            heading=block_data.get("heading"),
+            position=position,
+            body_markdown=block_data.get("body_markdown", ""),
+            structured=structured,
+            evidence=_report_evidence(block_data.get("evidence")),
+        )
+        db.add(rb)
+        inserted.append(rb)
+    await db.flush()
+
+    block_outs = [
+        ReportBlockOut(
+            id=b.id,
+            block_type=b.block_type,
+            heading=b.heading,
+            position=b.position,
+            body_markdown=b.body_markdown,
+            structured=b.structured,
+            evidence=b.evidence,
+        )
+        for b in sorted(inserted, key=lambda b: b.position)
+    ]
+
+    log.info(
+        "meta_analysis.complete",
+        extra={"report_id": report.id, "runs_compared": len(digests), "blocks": len(block_outs)},
+    )
+    return ReportResponse(
+        report_id=report.id,
+        kind=report.kind,
+        title=report.title,
+        summary=report.summary or "",
+        gauges=None,
+        blocks=block_outs,
+        model_used=report.model_used,
+        created_at=report.created_at,
     )

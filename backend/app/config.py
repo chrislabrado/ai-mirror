@@ -32,17 +32,26 @@ class Settings(BaseSettings):
     neo4j_password: str = "ai_mirror_local"
 
     # --- LLM ---
-    llm_provider: Literal["openai", "anthropic", "grok", "ollama"] = "openai"
-    llm_model: str = "gpt-4o-mini"
+    llm_provider: Literal["openai", "anthropic", "grok", "xai", "ollama", "claude_cli"] = "claude_cli"
+    llm_model: str = "claude-sonnet-4-6"
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None
     xai_api_key: str | None = None
     xai_base_url: str = "https://api.x.ai/v1"
     ollama_base_url: str = "http://localhost:11434"
+    claude_cli_bin: str = "claude"
 
-    # --- Embeddings ---
-    embedding_provider: Literal["openai", "ollama"] = "openai"
-    embedding_model: str = "text-embedding-3-small"
+    # --- Fable mode (tiered models) ---
+    # When on, "scaffold" calls (summaries, epoch profiles, extraction) use scaffold_model
+    # and "hard" calls (synthesis, trajectories, meta-analysis, critique) use hard_model.
+    fable_mode: bool = False
+    scaffold_model: str = "claude-sonnet-4-6"
+    hard_model: str = "claude-fable-5"
+    llm_max_concurrency: int = 3
+
+    # --- Remote ingestion ---
+    # Colon-separated roots the /ingest/remote connector may read from.
+    ingest_allowed_roots: str = "~/.claude/projects:~/.openclaw/agents"
 
     # --- HTTP ---
     cors_origins: str = "http://localhost:5173,http://localhost:4173"
@@ -53,6 +62,16 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def ingest_allowed_root_paths(self) -> list["Path"]:
+        from pathlib import Path
+
+        return [
+            Path(p).expanduser().resolve()
+            for p in self.ingest_allowed_roots.split(":")
+            if p.strip()
+        ]
 
 
 @lru_cache(maxsize=1)

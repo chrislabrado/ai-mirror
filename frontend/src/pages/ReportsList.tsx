@@ -15,6 +15,8 @@ const KIND_OPTIONS = [
   { value: "full_mirror", label: "Full Mirror" },
   { value: "advanced_abstract", label: "Advanced Abstract" },
   { value: "focus_lens", label: "Focus Lens" },
+  { value: "deep_dive", label: "Deep Dive" },
+  { value: "meta_analysis", label: "Meta-Analysis" },
 ] as const;
 
 function kindBadgeClass(kind: string): string {
@@ -25,6 +27,10 @@ function kindBadgeClass(kind: string): string {
       return "border-hud-glow2/60 text-hud-glow2 bg-hud-glow2/8";
     case "focus_lens":
       return "border-hud-warn/60 text-hud-warn bg-hud-warn/8";
+    case "deep_dive":
+      return "border-hud-accent/60 text-hud-accent bg-hud-accent/8";
+    case "meta_analysis":
+      return "border-hud-text/40 text-hud-text bg-hud-text/5";
     default:
       return "border-hud-line text-hud-textDim";
   }
@@ -38,6 +44,10 @@ function kindLabel(kind: string): string {
       return "Adv. Abstract";
     case "focus_lens":
       return "Focus Lens";
+    case "deep_dive":
+      return "Deep Dive";
+    case "meta_analysis":
+      return "Meta-Analysis";
     default:
       return kind;
   }

@@ -18,6 +18,7 @@ from app.routers import (
     ingest,
     insights,
     reports,
+    temporal,
 )
 from app.utils.logger import configure_logging, get_logger
 
@@ -72,3 +73,4 @@ app.include_router(history.router)
 app.include_router(ingest.router)
 app.include_router(insights.router)
 app.include_router(reports.router)
+app.include_router(temporal.router)

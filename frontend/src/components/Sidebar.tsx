@@ -7,6 +7,7 @@ import {
   MessagesSquare,
   Network,
   Telescope,
+  TrendingUp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +22,7 @@ const NAV: NavItemDef[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/history", label: "History", icon: MessagesSquare },
   { to: "/insights", label: "Insights", icon: BarChart3 },
+  { to: "/trajectories", label: "Trajectories", icon: TrendingUp },
   { to: "/graph", label: "Knowledge Graph", icon: Network },
   { to: "/queries", label: "Queries", icon: Compass },
   { to: "/focus-lens", label: "Focus Lens", icon: Telescope },
